@@ -18,7 +18,7 @@
 
 <br/>
 
-**[Live Demo](https://gitone.vercel.app)** · **[Report a Bug](https://github.com/richangchaudhary/GitOne/issues)** · **[Request a Feature](https://github.com/richangchaudhary/GitOne/issues)**
+**[Live Demo](https://gitone.vercel.app)** · **[Report a Bug](https://github.com/XPE-7/GitOne/issues)** · **[Request a Feature](https://github.com/XPE-7/GitOne/issues)**
 
 </div>
 
@@ -354,4 +354,4 @@ Set `NEXT_PUBLIC_BACKEND_URL` to your Railway URL in Vercel project settings.
 
 ## License
 
-MIT © [Richang Chaudhary](https://github.com/richangchaudhary)
+MIT © [Richang Chaudhary](https://github.com/XPE-7)
