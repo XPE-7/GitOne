@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import List
 
@@ -11,9 +12,22 @@ class Settings(BaseSettings):
     CEREBRAS_API_KEY: str = ""
     GITHUB_TOKEN: str = ""
     REPO_CACHE_DIR: str = "/tmp/gitone_repos"
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: str = "http://localhost:3000"
     MAX_ITERATIONS: int = 6
     MAX_REFINE_ITERATIONS: int = 2
+
+    @property
+    def cors_origins_list(self) -> List[str]:
+        value = self.CORS_ORIGINS.strip()
+        if not value:
+            return ["http://localhost:3000"]
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return [origin.strip() for origin in value.split(",") if origin.strip()]
 
     INVESTIGATOR_MODEL: str = "gpt-oss-120b"
     CRITIC_MODEL: str = "gpt-oss-120b"
