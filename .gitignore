@@ -57,3 +57,6 @@ coverage.xml
 
 # TypeScript build info
 frontend/tsconfig.tsbuildinfo
+
+# Lock file (generated per-platform, let CI install fresh)
+frontend/package-lock.json
