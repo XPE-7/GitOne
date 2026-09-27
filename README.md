@@ -13,7 +13,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.2-FF6B35?style=flat-square&logo=chainlink&logoColor=white)](https://langchain-ai.github.io/langgraph/)
 [![Next.js](https://img.shields.io/badge/Next.js-14-000000?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Cerebras](https://img.shields.io/badge/Cerebras-gpt--oss--120b-8B5CF6?style=flat-square&logoColor=white)](https://cerebras.ai)
+[![Groq](https://img.shields.io/badge/Groq-gpt--oss--120b-8B5CF6?style=flat-square&logoColor=white)](https://groq.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=flat-square)](LICENSE)
 
 <br/>
@@ -165,8 +165,8 @@ graph LR
 ### Backend
 - **FastAPI 0.115** — async Python web framework, SSE via `sse-starlette`
 - **LangGraph 1.2** — stateful multi-agent graph with cycles and conditional routing
-- **LangChain OpenAI** — `ChatOpenAI` pointed at Cerebras API (OpenAI-compatible)
-- **Cerebras `gpt-oss-120b`** — fast inference LLM for investigator, synthesizer, critic
+- **LangChain OpenAI** — `ChatOpenAI` pointed at Groq API (OpenAI-compatible)
+- **Groq `openai/gpt-oss-20b`** — fast inference LLM for investigator, synthesizer, critic
 - **GitPython 3.1** — git history, commit reading, file tree
 - **subprocess + porcelain** — `git blame --porcelain` parser for blame data
 - **httpx** — async GitHub REST API client with rate limit tracking
@@ -285,7 +285,7 @@ GitOne/
 ### Prerequisites
 - Python 3.11+
 - Node.js 18+
-- [Cerebras API key](https://cloud.cerebras.ai)
+- [Groq API key (free)](https://console.groq.com/keys)
 - [GitHub token](https://github.com/settings/tokens?type=beta) — `repo: read` scope
 
 ### Backend
@@ -297,7 +297,7 @@ source venv/bin/activate      # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# Edit .env — fill CEREBRAS_API_KEY and GITHUB_TOKEN
+# Edit .env — fill GROQ_API_KEY and GITHUB_TOKEN
 
 uvicorn app.main:app --reload --port 8000
 ```
@@ -321,7 +321,7 @@ cd backend && source venv/bin/activate
 # Test all 9 tools (no LLM needed)
 python -m tests.smoke_tools
 
-# Full investigation in terminal (needs CEREBRAS_API_KEY)
+# Full investigation in terminal (needs GROQ_API_KEY)
 python -m tests.smoke_agent
 ```
 
@@ -333,7 +333,7 @@ python -m tests.smoke_agent
 ```bash
 railway init && railway up
 ```
-Set env vars in Railway dashboard: `CEREBRAS_API_KEY`, `GITHUB_TOKEN`, `CORS_ORIGINS`
+Set env vars in your host dashboard: `GROQ_API_KEY`, `GITHUB_TOKEN`, `CORS_ORIGINS`
 
 ### Vercel (frontend)
 ```bash

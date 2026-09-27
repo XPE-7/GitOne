@@ -44,12 +44,22 @@ def _tool_to_evidence_type(tool_name: str) -> str:
     return mapping.get(tool_name, "search")
 
 
+def _content_to_text(content: str | list) -> str:
+    """Flatten a chat model's response content into plain text.
+
+    Gemini (and some other providers) return content as a list of typed
+    blocks (e.g. [{"type": "text", "text": "..."}]) rather than a plain
+    string — naively str()-ing that list would dump Python repr syntax
+    into what's supposed to be the narrative/JSON payload.
+    """
+    if isinstance(content, list):
+        return " ".join(c.get("text", "") if isinstance(c, dict) else str(c) for c in content)
+    return content or ""
+
+
 def _extract_rationale(content: str | list) -> str:
     """Pull the 'Rationale: ...' line from the model's text response."""
-    if isinstance(content, list):
-        text = " ".join(c.get("text", "") if isinstance(c, dict) else str(c) for c in content)
-    else:
-        text = content or ""
+    text = _content_to_text(content)
     match = re.search(r"Rationale:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
     return match.group(1).strip() if match else text[:200].strip()
 
@@ -82,10 +92,16 @@ def _evidence_id(tool_name: str, args: dict) -> str:
 def _make_llm(model: str, max_tokens: int = 2048, temperature: float = 0.2):
     return ChatOpenAI(
         model=model,
-        api_key=settings.CEREBRAS_API_KEY,
-        base_url="https://api.cerebras.ai/v1",
+        api_key=settings.GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1",
         max_tokens=max_tokens,
         temperature=temperature,
+        # Groq's free tier caps tokens/minute (8,000 TPM on this account) and this
+        # app's multi-step loop can burst past that within a minute. The OpenAI SDK
+        # already backs off on 429s honoring Groq's "try again in Ns" hint — just
+        # give it enough attempts to actually ride out a short rate-limit window
+        # instead of surfacing it as a hard failure after 2 tries.
+        max_retries=8,
     )
 
 
@@ -274,7 +290,7 @@ def make_synthesizer_node():
 
         messages = [SystemMessage(content=SYNTHESIZER_SYSTEM), HumanMessage(content=prompt)]
         response: AIMessage = await llm.ainvoke(messages)
-        text = response.content if isinstance(response.content, str) else str(response.content)
+        text = _content_to_text(response.content)
 
         parts = text.split("---CLAIMS---", 1)
         narrative = parts[0].strip()
@@ -332,7 +348,7 @@ def make_critic_node():
 
         messages = [SystemMessage(content=CRITIC_SYSTEM), HumanMessage(content=prompt)]
         response: AIMessage = await llm.ainvoke(messages)
-        text = response.content if isinstance(response.content, str) else str(response.content)
+        text = _content_to_text(response.content)
 
         flags: list[Flag] = []
         m = re.search(r"```json\s*([\s\S]*?)```", text, re.IGNORECASE)
