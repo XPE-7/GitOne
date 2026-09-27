@@ -6,7 +6,7 @@ Run from the backend/ directory:
 
     python -m tests.smoke_agent
 
-Requires CEREBRAS_API_KEY and GITHUB_TOKEN in backend/.env.
+Requires GROQ_API_KEY and GITHUB_TOKEN in backend/.env.
 """
 import asyncio
 import json
@@ -33,8 +33,8 @@ LINE_END = 952
 
 
 async def main() -> None:
-    if not os.getenv("CEREBRAS_API_KEY"):
-        sys.exit("CEREBRAS_API_KEY not set in backend/.env")
+    if not os.getenv("GROQ_API_KEY"):
+        sys.exit("GROQ_API_KEY not set in backend/.env")
     if not os.getenv("GITHUB_TOKEN"):
         print("WARNING: GITHUB_TOKEN not set — GitHub tool calls will be rate-limited")
 
