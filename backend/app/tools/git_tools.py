@@ -2,6 +2,7 @@
 Git tool factory. Call make_git_tools(git_service) to get a list of
 LangChain-compatible tool functions closed over the given service instance.
 """
+import asyncio
 import json
 from typing import Any
 
@@ -12,6 +13,20 @@ from app.services.git_service import GitService
 
 def make_git_tools(git_service: GitService) -> list:
 
+    def run_async(coro):
+        """Run an async coroutine from a sync tool function."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, coro)
+                    return future.result()
+            else:
+                return loop.run_until_complete(coro)
+        except RuntimeError:
+            return asyncio.run(coro)
+
     @tool
     def git_blame(file_path: str, line_start: int, line_end: int) -> str:
         """
@@ -21,7 +36,7 @@ def make_git_tools(git_service: GitService) -> list:
         Use this as your first step to find which commits are responsible for selected code.
         """
         try:
-            result = git_service.blame(file_path, line_start, line_end)
+            result = run_async(git_service.blame(file_path, line_start, line_end))
             # Deduplicate by SHA for compactness
             seen: set[str] = set()
             unique: list[dict[str, Any]] = []
@@ -41,7 +56,7 @@ def make_git_tools(git_service: GitService) -> list:
         Look for PR/issue references in the message (e.g. 'fixes #482', 'revert of #123').
         """
         try:
-            result = git_service.get_commit(sha)
+            result = run_async(git_service.get_commit(sha))
             return json.dumps(result, default=str)
         except Exception as e:
             return json.dumps({"error": str(e)})
@@ -55,7 +70,7 @@ def make_git_tools(git_service: GitService) -> list:
         Returns the raw file content (truncated to 4000 chars if large).
         """
         try:
-            content = git_service.get_file_at_commit(file_path, sha)
+            content = run_async(git_service.get_file_at_commit(file_path, sha))
             if len(content) > 4000:
                 content = content[:4000] + "\n... (truncated)"
             return json.dumps({"content": content, "sha": sha, "file_path": file_path})
@@ -70,7 +85,7 @@ def make_git_tools(git_service: GitService) -> list:
         Use this to see the full evolution of a file and identify key change points.
         """
         try:
-            result = git_service.get_file_history(file_path, limit)
+            result = run_async(git_service.get_file_history(file_path, limit))
             return json.dumps({"commits": result, "file_path": file_path}, default=str)
         except Exception as e:
             return json.dumps({"error": str(e)})
@@ -83,7 +98,7 @@ def make_git_tools(git_service: GitService) -> list:
         Returns matching commits with SHA, author, date, and subject.
         """
         try:
-            result = git_service.search_commit_messages(query, limit)
+            result = run_async(git_service.search_commit_messages(query, limit))
             return json.dumps({"commits": result, "query": query}, default=str)
         except Exception as e:
             return json.dumps({"error": str(e)})

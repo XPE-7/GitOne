@@ -24,10 +24,7 @@ router = APIRouter()
 
 _investigations: dict[str, tuple[dict, object]] = {}
 
-_repo_cache = RepoCache(
-    cache_dir=settings.REPO_CACHE_DIR,
-    max_repos=10,
-)
+_repo_cache = RepoCache(cache_dir=settings.REPO_CACHE_DIR)
 
 # owner/repo — alphanumeric, hyphens, underscores, dots only
 _REPO_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}/[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$")
@@ -58,6 +55,8 @@ async def start_investigation(request: InvestigateRequest):
 
     try:
         repo_path: Path = await _repo_cache.get_repo(request.repo)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         logger.exception("Failed to clone repo %s", request.repo)
         raise HTTPException(status_code=502, detail="Could not clone repository. Check the repo name and try again.")
@@ -68,7 +67,7 @@ async def start_investigation(request: InvestigateRequest):
     github_svc = GitHubService(token=settings.GITHUB_TOKEN)
 
     try:
-        full_file = git_svc.get_file_contents(request.file_path)
+        full_file = await git_svc.get_file_contents(request.file_path)
         lines = full_file.splitlines()
         selected_lines = lines[request.line_start - 1: request.line_end]
         selected_code = "\n".join(
@@ -129,13 +128,15 @@ async def get_repo_tree(owner: str, repo: str, ref: str = "HEAD"):
 
     try:
         repo_path = await _repo_cache.get_repo(f"{owner}/{repo}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         logger.exception("Failed to clone %s/%s", owner, repo)
         raise HTTPException(status_code=502, detail="Could not clone repository.")
 
     git_svc = GitService(repo_path)
     try:
-        tree = git_svc.get_file_tree(ref=ref)
+        tree = await git_svc.get_file_tree(ref=ref)
         return {"entries": tree}
     except Exception:
         logger.exception("get_file_tree failed for %s/%s at %s", owner, repo, ref)
@@ -155,6 +156,8 @@ async def get_file(
 
     try:
         repo_path = await _repo_cache.get_repo(f"{owner}/{repo}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         logger.exception("Failed to clone %s/%s", owner, repo)
         raise HTTPException(status_code=502, detail="Could not clone repository.")
@@ -163,7 +166,7 @@ async def get_file(
 
     git_svc = GitService(repo_path)
     try:
-        content = git_svc.get_file_contents(path, ref=ref)
+        content = await git_svc.get_file_contents(path, ref=ref)
         return {"content": content, "path": path, "ref": ref}
     except Exception:
         logger.exception("get_file_contents failed: %s/%s %s", owner, repo, path)

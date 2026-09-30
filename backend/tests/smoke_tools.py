@@ -41,7 +41,7 @@ def _pp(label: str, result: str) -> None:
 async def main() -> None:
     print(f"\nSmoke test — {REPO}\n")
 
-    cache = RepoCache(cache_dir="/tmp/gitone_smoke", max_repos=3)
+    cache = RepoCache(cache_dir="/tmp/gitone_smoke")
     print("Cloning repo (cached after first run)…")
     repo_path = await cache.get_repo(REPO)
 

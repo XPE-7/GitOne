@@ -1,10 +1,11 @@
-import subprocess
-import json
+import asyncio
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
 import git
+
+GIT_TIMEOUT_SECONDS = 20
 
 
 @dataclass
@@ -51,31 +52,46 @@ class GitService:
         self.repo_path = repo_path
         self._repo = git.Repo(str(repo_path))
 
+    # ── Subprocess helper ────────────────────────────────────────────────────
+
+    async def _run_git(self, *args: str) -> tuple[int, str, str]:
+        process = await asyncio.create_subprocess_exec(
+            "git", *args,
+            cwd=str(self.repo_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=GIT_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            raise
+        return process.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+
     # ── Blame ──────────────────────────────────────────────────────────────
 
-    def blame(self, file_path: str, line_start: int, line_end: int) -> list[dict[str, Any]]:
-        def _run_blame():
-            return subprocess.run(
-                ["git", "blame", "-L", f"{line_start},{line_end}", "--porcelain", file_path],
-                cwd=str(self.repo_path),
-                capture_output=True,
-                text=True,
-            )
+    async def blame(self, file_path: str, line_start: int, line_end: int) -> list[dict[str, Any]]:
+        args = ("blame", "-L", f"{line_start},{line_end}", "--porcelain", file_path)
+        try:
+            code, out, err = await self._run_git(*args)
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"git blame timed out after {GIT_TIMEOUT_SECONDS} seconds")
 
-        result = _run_blame()
         # If blame fails due to missing promisor objects (lazy fetch failure), retry once
         # after fetching missing blobs explicitly.
-        if result.returncode != 0 and "promisor" in result.stderr:
-            subprocess.run(
-                ["git", "fetch", "--filter=blob:none", "origin"],
-                cwd=str(self.repo_path),
-                capture_output=True,
-            )
-            result = _run_blame()
+        if code != 0 and "promisor" in err:
+            try:
+                await self._run_git("fetch", "--filter=blob:none", "origin")
+                code, out, err = await self._run_git(*args)
+            except asyncio.TimeoutError:
+                raise RuntimeError(f"git blame timed out after {GIT_TIMEOUT_SECONDS} seconds")
 
-        if result.returncode != 0:
-            raise RuntimeError(f"git blame failed: {result.stderr.strip()}")
-        return [asdict(e) for e in self._parse_porcelain_blame(result.stdout)]
+        if code != 0:
+            raise RuntimeError(f"git blame failed: {err.strip()}")
+        return [asdict(e) for e in self._parse_porcelain_blame(out)]
 
     def _parse_porcelain_blame(self, output: str) -> list[BlameEntry]:
         entries: list[BlameEntry] = []
@@ -113,59 +129,70 @@ class GitService:
 
     # ── Commit detail ──────────────────────────────────────────────────────
 
-    def get_commit(self, sha: str) -> dict[str, Any]:
-        try:
+    async def get_commit(self, sha: str) -> dict[str, Any]:
+        def _get() -> CommitDetail:
             commit = self._repo.commit(sha)
+            stats = commit.stats
+            return CommitDetail(
+                sha=commit.hexsha,
+                message=commit.message.strip(),
+                author=str(commit.author.name),
+                email=str(commit.author.email),
+                date=commit.committed_datetime.isoformat(),
+                parents=[p.hexsha for p in commit.parents],
+                files_changed=stats.total["files"],
+                insertions=stats.total["insertions"],
+                deletions=stats.total["deletions"],
+                changed_files=list(stats.files.keys())[:20],  # cap to 20
+            )
+
+        try:
+            detail = await asyncio.wait_for(asyncio.to_thread(_get), timeout=GIT_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"get_commit timed out after {GIT_TIMEOUT_SECONDS} seconds")
         except Exception as e:
             raise ValueError(f"Commit {sha} not found: {e}")
-
-        stats = commit.stats
-        return asdict(CommitDetail(
-            sha=commit.hexsha,
-            message=commit.message.strip(),
-            author=str(commit.author.name),
-            email=str(commit.author.email),
-            date=commit.committed_datetime.isoformat(),
-            parents=[p.hexsha for p in commit.parents],
-            files_changed=stats.total["files"],
-            insertions=stats.total["insertions"],
-            deletions=stats.total["deletions"],
-            changed_files=list(stats.files.keys())[:20],  # cap to 20
-        ))
+        return asdict(detail)
 
     # ── File at commit ─────────────────────────────────────────────────────
 
-    def get_file_at_commit(self, file_path: str, sha: str) -> str:
+    async def get_file_at_commit(self, file_path: str, sha: str) -> str:
         try:
-            return self._repo.git.show(f"{sha}:{file_path}")
-        except git.GitCommandError as e:
-            raise ValueError(f"File {file_path} not found at {sha}: {e}")
+            code, out, err = await self._run_git("show", f"{sha}:{file_path}")
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"get_file_at_commit timed out after {GIT_TIMEOUT_SECONDS} seconds")
+        if code != 0:
+            raise ValueError(f"File {file_path} not found at {sha}: {err.strip()}")
+        return out
 
     # ── File history ───────────────────────────────────────────────────────
 
-    def get_file_history(self, file_path: str, limit: int = 20) -> list[dict[str, Any]]:
-        raw = self._repo.git.log(
-            "--follow",
-            f"--format=%H|%an|%ae|%aI|%s",
-            f"-{limit}",
-            "--",
-            file_path,
-        )
-        return [asdict(self._parse_summary_line(l)) for l in raw.splitlines() if l.strip()]
+    async def get_file_history(self, file_path: str, limit: int = 20) -> list[dict[str, Any]]:
+        try:
+            code, out, err = await self._run_git(
+                "log", "--follow", "--format=%H|%an|%ae|%aI|%s", f"-{limit}", "--", file_path,
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"get_file_history timed out after {GIT_TIMEOUT_SECONDS} seconds")
+        if code != 0:
+            raise ValueError(f"git log failed: {err.strip()}")
+        return [asdict(self._parse_summary_line(l)) for l in out.splitlines() if l.strip()]
 
     # ── Search commit messages ─────────────────────────────────────────────
 
-    def search_commit_messages(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    async def search_commit_messages(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         # Strip characters that could escape the --grep value or inject git flags
         safe_query = query.replace("\n", " ").replace("\r", "")[:200]
-        raw = self._repo.git.log(
-            "--all",
-            f"--format=%H|%an|%ae|%aI|%s",
-            f"--grep={safe_query}",
-            "--regexp-ignore-case",
-            f"-{min(limit, 50)}",
-        )
-        return [asdict(self._parse_summary_line(l)) for l in raw.splitlines() if l.strip()]
+        try:
+            code, out, err = await self._run_git(
+                "log", "--all", "--format=%H|%an|%ae|%aI|%s",
+                f"--grep={safe_query}", "--regexp-ignore-case", f"-{min(limit, 50)}",
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"search_commit_messages timed out after {GIT_TIMEOUT_SECONDS} seconds")
+        if code != 0:
+            raise ValueError(f"git log failed: {err.strip()}")
+        return [asdict(self._parse_summary_line(l)) for l in out.splitlines() if l.strip()]
 
     def _parse_summary_line(self, line: str) -> CommitSummary:
         parts = line.split("|", 4)
@@ -179,14 +206,22 @@ class GitService:
 
     # ── File tree ──────────────────────────────────────────────────────────
 
-    def get_file_tree(self, ref: str = "HEAD") -> list[str]:
-        raw = self._repo.git.ls_tree("-r", "--name-only", ref)
-        return [l for l in raw.splitlines() if l.strip()]
+    async def get_file_tree(self, ref: str = "HEAD") -> list[str]:
+        try:
+            code, out, err = await self._run_git("ls-tree", "-r", "--name-only", ref)
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"get_file_tree timed out after {GIT_TIMEOUT_SECONDS} seconds")
+        if code != 0:
+            raise ValueError(f"git ls-tree failed: {err.strip()}")
+        return [l for l in out.splitlines() if l.strip()]
 
     # ── File contents ──────────────────────────────────────────────────────
 
-    def get_file_contents(self, file_path: str, ref: str = "HEAD") -> str:
+    async def get_file_contents(self, file_path: str, ref: str = "HEAD") -> str:
         try:
-            return self._repo.git.show(f"{ref}:{file_path}")
-        except git.GitCommandError as e:
-            raise ValueError(f"Could not read {file_path} at {ref}: {e}")
+            code, out, err = await self._run_git("show", f"{ref}:{file_path}")
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"get_file_contents timed out after {GIT_TIMEOUT_SECONDS} seconds")
+        if code != 0:
+            raise ValueError(f"Could not read {file_path} at {ref}: {err.strip()}")
+        return out

@@ -38,7 +38,7 @@ async def main() -> None:
     if not os.getenv("GITHUB_TOKEN"):
         print("WARNING: GITHUB_TOKEN not set — GitHub tool calls will be rate-limited")
 
-    cache = RepoCache(cache_dir="/tmp/gitone_smoke", max_repos=3)
+    cache = RepoCache(cache_dir="/tmp/gitone_smoke")
     print(f"Loading {REPO}…")
     repo_path = await cache.get_repo(REPO)
 
@@ -47,7 +47,7 @@ async def main() -> None:
     owner, repo_name = REPO.split("/")
 
     try:
-        full = git_svc.get_file_contents(FILE_PATH)
+        full = await git_svc.get_file_contents(FILE_PATH)
         snippet = "\n".join(
             f"{LINE_START + i:4d}  {l}"
             for i, l in enumerate(full.splitlines()[LINE_START - 1: LINE_END])
